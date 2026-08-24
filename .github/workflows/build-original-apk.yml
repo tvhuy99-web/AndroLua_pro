@@ -12,7 +12,7 @@ permissions:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     timeout-minutes: 45
 
     steps:
@@ -25,6 +25,12 @@ jobs:
           distribution: temurin
           java-version: '8'
 
+      - name: Install old NDK compatibility library
+        shell: bash
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libtinfo5
+
       - name: Build and capture log
         shell: bash
         run: |
@@ -33,6 +39,7 @@ jobs:
           {
             echo "=== Environment ==="
             java -version
+            ldconfig -p | grep 'libtinfo.so.5' || true
 
             SDK_ROOT="$RUNNER_TEMP/android-sdk"
             NDK_ROOT="$RUNNER_TEMP/android-ndk-r17c"
