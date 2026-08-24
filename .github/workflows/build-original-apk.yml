@@ -5,6 +5,7 @@ on:
   push:
     paths:
       - '.github/workflows/build-original-apk.yml'
+  pull_request:
 
 permissions:
   contents: write
@@ -90,7 +91,7 @@ jobs:
             native-libs/**
 
       - name: Record artifact metadata and log
-        if: always()
+        if: always() && github.event_name != 'pull_request'
         shell: bash
         run: |
           echo "artifact_id=${{ steps.upload.outputs.artifact-id }}" >> ci-output/latest.txt
