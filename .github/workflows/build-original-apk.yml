@@ -24,37 +24,63 @@ jobs:
           distribution: temurin
           java-version: '8'
 
-      - name: Install Android SDK 28, Build Tools 28.0.3 and NDK r17c
+      - name: Build and capture log
         shell: bash
         run: |
-          yes | sdkmanager --licenses >/dev/null || true
-          sdkmanager "platforms;android-28" "build-tools;28.0.3" "ndk;17.2.4988734"
-          echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/17.2.4988734" >> "$GITHUB_ENV"
-          echo "ANDROID_NDK_ROOT=$ANDROID_HOME/ndk/17.2.4988734" >> "$GITHUB_ENV"
+          mkdir -p ci-output native-libs
+          set +e
+          {
+            echo "=== Environment ==="
+            java -version
+            echo "ANDROID_HOME=$ANDROID_HOME"
 
-      - name: Install Gradle 4.6
-        shell: bash
-        run: |
-          curl -L --fail --retry 3 -o /tmp/gradle-4.6-bin.zip https://services.gradle.org/distributions/gradle-4.6-bin.zip
-          unzip -q /tmp/gradle-4.6-bin.zip -d /tmp
-          echo "/tmp/gradle-4.6/bin" >> "$GITHUB_PATH"
+            echo "=== Install SDK / NDK ==="
+            yes | sdkmanager --licenses >/dev/null 2>&1 || true
+            sdkmanager "platforms;android-28" "build-tools;28.0.3" "ndk;17.2.4988734"
+            SDK_STATUS=$?
+            echo "sdk_status=$SDK_STATUS"
 
-      - name: Build debug APK
-        shell: bash
-        run: |
-          gradle --version
-          gradle --no-daemon --stacktrace :app:assembleDebug
+            export ANDROID_NDK_HOME="$ANDROID_HOME/ndk/17.2.4988734"
+            export ANDROID_NDK_ROOT="$ANDROID_HOME/ndk/17.2.4988734"
 
-      - name: Extract native libraries
-        shell: bash
-        run: |
-          rm -rf native-libs
-          mkdir -p native-libs
-          unzip -q app/build/outputs/apk/debug/app-debug.apk 'lib/*' -d native-libs || true
-          find native-libs -type f -maxdepth 4 -print || true
+            echo "=== Install Gradle 4.6 ==="
+            curl -L --fail --retry 3 -o /tmp/gradle-4.6-bin.zip https://services.gradle.org/distributions/gradle-4.6-bin.zip
+            CURL_STATUS=$?
+            echo "gradle_download_status=$CURL_STATUS"
+            if [ "$CURL_STATUS" -eq 0 ]; then
+              rm -rf /tmp/gradle-4.6
+              unzip -q /tmp/gradle-4.6-bin.zip -d /tmp
+              export PATH="/tmp/gradle-4.6/bin:$PATH"
+              gradle --version
+            fi
+
+            BUILD_STATUS=99
+            if [ "$SDK_STATUS" -eq 0 ] && [ "$CURL_STATUS" -eq 0 ]; then
+              echo "=== Build debug APK ==="
+              gradle --no-daemon --stacktrace :app:assembleDebug
+              BUILD_STATUS=$?
+            fi
+            echo "build_status=$BUILD_STATUS"
+
+            if [ -f app/build/outputs/apk/debug/app-debug.apk ]; then
+              echo "=== Extract native libraries ==="
+              unzip -q app/build/outputs/apk/debug/app-debug.apk 'lib/*' -d native-libs || true
+              find native-libs -type f -maxdepth 4 -print || true
+            fi
+          } 2>&1 | tee ci-output/build.log
+
+          SDK_STATUS=$(grep -E '^sdk_status=' ci-output/build.log | tail -1 | cut -d= -f2)
+          BUILD_STATUS=$(grep -E '^build_status=' ci-output/build.log | tail -1 | cut -d= -f2)
+          echo "sdk_status=${SDK_STATUS:-unknown}" > ci-output/latest.txt
+          echo "build_status=${BUILD_STATUS:-unknown}" >> ci-output/latest.txt
+          echo "run_id=${GITHUB_RUN_ID}" >> ci-output/latest.txt
+          echo "run_number=${GITHUB_RUN_NUMBER}" >> ci-output/latest.txt
+          echo "commit=${GITHUB_SHA}" >> ci-output/latest.txt
+          exit 0
 
       - name: Upload APK and native libraries
         id: upload
+        if: ${{ hashFiles('app/build/outputs/apk/debug/app-debug.apk') != '' }}
         uses: actions/upload-artifact@v4
         with:
           name: androlua-original-build
@@ -63,19 +89,15 @@ jobs:
             app/build/outputs/apk/debug/app-debug.apk
             native-libs/**
 
-      - name: Record artifact metadata
+      - name: Record artifact metadata and log
+        if: always()
         shell: bash
         run: |
-          mkdir -p ci-output
-          cat > ci-output/latest.txt <<EOF
-          run_id=${GITHUB_RUN_ID}
-          run_number=${GITHUB_RUN_NUMBER}
-          artifact_id=${{ steps.upload.outputs.artifact-id }}
-          artifact_url=${{ steps.upload.outputs.artifact-url }}
-          commit=${GITHUB_SHA}
-          EOF
+          echo "artifact_id=${{ steps.upload.outputs.artifact-id }}" >> ci-output/latest.txt
+          echo "artifact_url=${{ steps.upload.outputs.artifact-url }}" >> ci-output/latest.txt
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add ci-output/latest.txt
-          git commit -m "Record latest AndroLua build artifact" || exit 0
-          git push
+          git add ci-output/latest.txt ci-output/build.log
+          git commit -m "Record latest AndroLua CI build result" || exit 0
+          git pull --rebase origin master || true
+          git push origin HEAD:master
