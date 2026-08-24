@@ -33,25 +33,62 @@ jobs:
           {
             echo "=== Environment ==="
             java -version
-            echo "ANDROID_HOME=$ANDROID_HOME"
 
-            echo "=== Install SDK / NDK ==="
-            yes | sdkmanager --licenses >/dev/null 2>&1 || true
-            sdkmanager "platforms;android-28" "build-tools;28.0.3" "ndk;17.2.4988734"
-            SDK_STATUS=$?
+            SDK_ROOT="$RUNNER_TEMP/android-sdk"
+            NDK_ROOT="$RUNNER_TEMP/android-ndk-r17c"
+            rm -rf "$SDK_ROOT" "$NDK_ROOT" "$RUNNER_TEMP/platform-unpack" "$RUNNER_TEMP/buildtools-unpack"
+            mkdir -p "$SDK_ROOT/platforms" "$SDK_ROOT/build-tools" "$RUNNER_TEMP/platform-unpack" "$RUNNER_TEMP/buildtools-unpack"
+
+            echo "=== Download Android Platform 28 ==="
+            curl -L --fail --retry 3 -o "$RUNNER_TEMP/platform-28_r06.zip" https://dl.google.com/android/repository/platform-28_r06.zip
+            PLATFORM_STATUS=$?
+            if [ "$PLATFORM_STATUS" -eq 0 ]; then
+              unzip -q "$RUNNER_TEMP/platform-28_r06.zip" -d "$RUNNER_TEMP/platform-unpack"
+              mv "$RUNNER_TEMP/platform-unpack/android-9" "$SDK_ROOT/platforms/android-28"
+            fi
+            echo "platform_status=$PLATFORM_STATUS"
+
+            echo "=== Download Build Tools 28.0.3 ==="
+            curl -L --fail --retry 3 -o "$RUNNER_TEMP/build-tools_r28.0.3-linux.zip" https://dl.google.com/android/repository/build-tools_r28.0.3-linux.zip
+            BUILDTOOLS_STATUS=$?
+            if [ "$BUILDTOOLS_STATUS" -eq 0 ]; then
+              unzip -q "$RUNNER_TEMP/build-tools_r28.0.3-linux.zip" -d "$RUNNER_TEMP/buildtools-unpack"
+              mv "$RUNNER_TEMP/buildtools-unpack/android-9" "$SDK_ROOT/build-tools/28.0.3"
+              chmod +x "$SDK_ROOT/build-tools/28.0.3"/* 2>/dev/null || true
+            fi
+            echo "buildtools_status=$BUILDTOOLS_STATUS"
+
+            echo "=== Download NDK r17c ==="
+            curl -L --fail --retry 3 -o "$RUNNER_TEMP/android-ndk-r17c-linux-x86_64.zip" https://dl.google.com/android/repository/android-ndk-r17c-linux-x86_64.zip
+            NDK_STATUS=$?
+            if [ "$NDK_STATUS" -eq 0 ]; then
+              unzip -q "$RUNNER_TEMP/android-ndk-r17c-linux-x86_64.zip" -d "$RUNNER_TEMP"
+            fi
+            echo "ndk_status=$NDK_STATUS"
+
+            export ANDROID_HOME="$SDK_ROOT"
+            export ANDROID_SDK_ROOT="$SDK_ROOT"
+            export ANDROID_NDK_HOME="$NDK_ROOT"
+            export ANDROID_NDK_ROOT="$NDK_ROOT"
+            printf 'sdk.dir=%s\nndk.dir=%s\n' "$SDK_ROOT" "$NDK_ROOT" > local.properties
+
+            SDK_STATUS=0
+            [ "$PLATFORM_STATUS" -eq 0 ] || SDK_STATUS=1
+            [ "$BUILDTOOLS_STATUS" -eq 0 ] || SDK_STATUS=1
+            [ "$NDK_STATUS" -eq 0 ] || SDK_STATUS=1
+            [ -f "$SDK_ROOT/platforms/android-28/android.jar" ] || SDK_STATUS=1
+            [ -x "$SDK_ROOT/build-tools/28.0.3/aapt" ] || SDK_STATUS=1
+            [ -x "$NDK_ROOT/ndk-build" ] || SDK_STATUS=1
             echo "sdk_status=$SDK_STATUS"
 
-            export ANDROID_NDK_HOME="$ANDROID_HOME/ndk/17.2.4988734"
-            export ANDROID_NDK_ROOT="$ANDROID_HOME/ndk/17.2.4988734"
-
             echo "=== Install Gradle 4.6 ==="
-            curl -L --fail --retry 3 -o /tmp/gradle-4.6-bin.zip https://services.gradle.org/distributions/gradle-4.6-bin.zip
+            curl -L --fail --retry 3 -o "$RUNNER_TEMP/gradle-4.6-bin.zip" https://services.gradle.org/distributions/gradle-4.6-bin.zip
             CURL_STATUS=$?
             echo "gradle_download_status=$CURL_STATUS"
             if [ "$CURL_STATUS" -eq 0 ]; then
-              rm -rf /tmp/gradle-4.6
-              unzip -q /tmp/gradle-4.6-bin.zip -d /tmp
-              export PATH="/tmp/gradle-4.6/bin:$PATH"
+              rm -rf "$RUNNER_TEMP/gradle-4.6"
+              unzip -q "$RUNNER_TEMP/gradle-4.6-bin.zip" -d "$RUNNER_TEMP"
+              export PATH="$RUNNER_TEMP/gradle-4.6/bin:$PATH"
               gradle --version
             fi
 
@@ -67,6 +104,7 @@ jobs:
               echo "=== Extract native libraries ==="
               unzip -q app/build/outputs/apk/debug/app-debug.apk 'lib/*' -d native-libs || true
               find native-libs -type f -maxdepth 4 -print || true
+              ls -lh app/build/outputs/apk/debug/app-debug.apk
             fi
           } 2>&1 | tee ci-output/build.log
 
