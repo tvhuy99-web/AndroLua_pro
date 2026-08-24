@@ -1,3 +1,4 @@
 Trigger GitHub Actions build probe for AndroLua Pro.
 Retry after direct SDK/NDK download fix.
 Retry after Android.mk path fix.
+Retry on Ubuntu 22.04 with libtinfo5.
