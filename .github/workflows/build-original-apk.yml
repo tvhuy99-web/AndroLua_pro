@@ -6,6 +6,9 @@ on:
     paths:
       - '.github/workflows/build-original-apk.yml'
 
+permissions:
+  contents: write
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -51,6 +54,7 @@ jobs:
           find native-libs -type f -maxdepth 4 -print || true
 
       - name: Upload APK and native libraries
+        id: upload
         uses: actions/upload-artifact@v4
         with:
           name: androlua-original-build
@@ -58,3 +62,20 @@ jobs:
           path: |
             app/build/outputs/apk/debug/app-debug.apk
             native-libs/**
+
+      - name: Record artifact metadata
+        shell: bash
+        run: |
+          mkdir -p ci-output
+          cat > ci-output/latest.txt <<EOF
+          run_id=${GITHUB_RUN_ID}
+          run_number=${GITHUB_RUN_NUMBER}
+          artifact_id=${{ steps.upload.outputs.artifact-id }}
+          artifact_url=${{ steps.upload.outputs.artifact-url }}
+          commit=${GITHUB_SHA}
+          EOF
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add ci-output/latest.txt
+          git commit -m "Record latest AndroLua build artifact" || exit 0
+          git push
